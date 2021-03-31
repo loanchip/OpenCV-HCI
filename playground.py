@@ -1,43 +1,56 @@
 # Imports
 import os
 import time
+import datetime
 import numpy as np
 import cv2
-import face_recognition
+import pyautogui
 
-def LoadFaces(path):
-    files_list = [files_list for _,_,files_list in os.walk(top=path)][0]
-    print(files_list)
-    
-    known_face_encodings = []
-    known_face_names = []
+def grab_contours(cnts):
+    # if the length the contours tuple returned by cv2.findContours
+    # is '2' then we are using either OpenCV v2.4, v4-beta, or
+    # v4-official
+    if len(cnts) == 2:
+        cnts = cnts[0]
 
-    for fname in files_list:
-        face_image = face_recognition.load_image_file(path+fname)
-        face_encoding = face_recognition.face_encodings(face_image)[0]
+    # if the length of the contours tuple is '3' then we are using
+    # either OpenCV v3, v4-pre, or v4-alpha
+    elif len(cnts) == 3:
+        cnts = cnts[1]
 
-        known_face_names.append(fname[:-4])
-        known_face_encodings.append(face_encoding)
+    # otherwise OpenCV has changed their cv2.findContours return
+    # signature yet again and I have no idea WTH is going on
+    else:
+        raise Exception(("Contours tuple must have length 2 or 3, "
+            "otherwise OpenCV changed their cv2.findContours return "
+            "signature yet again. Refer to OpenCV's documentation "
+            "in that case"))
 
-    return known_face_encodings, known_face_names
+    # return the actual contours array
+    return cnts
 
 if __name__ == '__main__':
-    
-    # Load Known Faces
-    known_face_encodings, known_face_names = LoadFaces('data/faces/')
-
     # init camera
     execution_path = os.getcwd()
     camera = cv2.VideoCapture(0)
 
-    faces_refresh_rate = 30
-    ticker = faces_refresh_rate-1
-
     font = cv2.FONT_HERSHEY_COMPLEX_SMALL
-    faces_left, faces_right, faces_top, faces_bottom, faces_names = [], [], [], [], []
+
+    # Grab a single frame of video
+    ret, frame = camera.read()
+    # Initialize the 'background'
+    fast_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+    gray = cv2.cvtColor(fast_frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (21, 21), 0)
+    background = gray
+    
+    prevCnt = (0,0,0,0)
+    movement_direction = None
 
     while True:
-        ticker += 1
+        # Set background to previous frame
+        background = gray
+
         # Init and FPS process
         start_time = time.time()
 
@@ -47,39 +60,78 @@ if __name__ == '__main__':
         # calculate FPS >> FPS = 1 / time to process loop
         fpsInfo = "FPS: " + str(1.0 / (time.time() - start_time)) 
         #print(fpsInfo)
-
         cv2.putText(frame, fpsInfo, (10, 10), font, 0.4, (255, 255, 255), 1)
 
-        if ticker == faces_refresh_rate:
-            fast_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-            rgb_frame = fast_frame[:, :, ::-1]
+        text = "No Movement"
 
-            face_locations = face_recognition.face_locations(rgb_frame)
-            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+        fast_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+        gray = cv2.cvtColor(fast_frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
-            faces_left, faces_right, faces_top, faces_bottom, faces_names = [], [], [], [], []
+        # compute the absolute difference between the current frame and background
+        frameDelta = cv2.absdiff(background, gray)
+        # speed threshold - 25 pixels
+        thresh = cv2.threshold(frameDelta, 25, 255, cv2.THRESH_BINARY)[1]
+        # dilate the thresholded image to fill in holes, then find contours
+        # on thresholded image
+        thresh = cv2.dilate(thresh, None, iterations=2)
+        cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cnts = grab_contours(cnts)
+        # loop over the contours
+        if cnts: print('-'*30)
+        biggestCnt = None
+        biggestCntArea = 0
+        for c in cnts:
+            area = cv2.contourArea(c)
+            # if the contour is too small, ignore it
+            if area < 20:
+                continue
             
-            for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-                matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-                name = "Unknown"
-                face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-                best_match_index = np.argmin(face_distances)
-                if matches[best_match_index]:
-                    name = known_face_names[best_match_index]
-                
-                faces_left.append(left*4)
-                faces_right.append(right*4)
-                faces_top.append(top*4)
-                faces_bottom.append(bottom*4)
-                faces_names.append(name)
-            print('In Frame: ', faces_names)
-            ticker = 0
+            # compute the bounding box for the contour, draw it on the frame,
+            # and update the text
+            (x, y, w, h) = cv2.boundingRect(c)
+            #print((x, y, w, h))
+            #cv2.rectangle(frame, (x*4, y*4), (x*4 + w*4, y*4 + h*4), (0, 255, 0), 2)
+            text = "Detecting"
 
-        for index,name in enumerate(faces_names):
-            cv2.rectangle(frame, (faces_left[index], faces_top[index]), (faces_right[index], faces_bottom[index]), (0, 0, 255), 2)
-            cv2.rectangle(frame, (faces_left[index], faces_bottom[index] - 25), (faces_right[index], faces_bottom[index]), (0, 0, 255), cv2.FILLED)
-            cv2.putText(frame, name, (faces_left[index] + 6, faces_bottom[index] - 6), font, 0.7, (255, 255, 255), 1)
+            if area > biggestCntArea:
+                biggestCnt = (x, y, w, h)
 
+        if prevCnt and biggestCnt:
+            (x, y, w, h) = biggestCnt
+            cv2.rectangle(frame, (x*4, y*4), (x*4 + w*4, y*4 + h*4), (0, 255, 0), 2)
+            
+            xOffset = 10*(prevCnt[0] - biggestCnt[0])
+            yOffset = 10*(biggestCnt[1] - prevCnt[1])
+
+            print('Movement:', end='\t')
+            if biggestCnt[0] > prevCnt[0]:
+                print('Left', end='\t')
+            elif biggestCnt[0] < prevCnt[0]:
+                print('Right', end='\t')
+            else:
+                print(end='\t')
+
+            if biggestCnt[1] > prevCnt[1]:
+                print('Down', end='\t')
+            elif biggestCnt[1] < prevCnt[1]:
+                print('Up', end='\t')
+            else:
+                print(end='\t')
+
+            pyautogui.moveRel(xOffset, yOffset)
+            print()
+
+        # draw the text and timestamp on the frame
+        cv2.putText(frame, "Room Status: {}".format(text), (10, 20), font, 0.5, (0, 0, 255), 2)
+        cv2.putText(frame, datetime.datetime.now().strftime("%A %d %B %Y %I:%M:%S%p"), (10, frame.shape[0] - 10), font, 0.35, (0, 0, 255), 1)
+        # show the frame and record if the user presses a key
+        cv2.imshow("Security Feed", frame)
+        cv2.imshow("Thresh", thresh)
+        cv2.imshow("Frame Delta", frameDelta)
+
+        prevCnt = biggestCnt
+        
         # Display the resulting image
         cv2.imshow('Video', frame)
 
