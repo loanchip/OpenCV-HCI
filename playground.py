@@ -5,29 +5,16 @@ import datetime
 import numpy as np
 import cv2
 import pyautogui
+import mediapipe as mp
+mp_drawing = mp.solutions.drawing_utils
+mp_hands = mp.solutions.hands
 
-def grab_contours(cnts):
-    # if the length the contours tuple returned by cv2.findContours
-    # is '2' then we are using either OpenCV v2.4, v4-beta, or
-    # v4-official
-    if len(cnts) == 2:
-        cnts = cnts[0]
-
-    # if the length of the contours tuple is '3' then we are using
-    # either OpenCV v3, v4-pre, or v4-alpha
-    elif len(cnts) == 3:
-        cnts = cnts[1]
-
-    # otherwise OpenCV has changed their cv2.findContours return
-    # signature yet again and I have no idea WTH is going on
-    else:
-        raise Exception(("Contours tuple must have length 2 or 3, "
-            "otherwise OpenCV changed their cv2.findContours return "
-            "signature yet again. Refer to OpenCV's documentation "
-            "in that case"))
-
-    # return the actual contours array
-    return cnts
+def image_preprocess(image):
+    #fast_image = cv2.resize(image, (0, 0), fx=0.5, fy=0.5)
+    # Flip the image horizontally for a later selfie-view display, and convert
+    # the BGR image to RGB.
+    image = cv2.cvtColor(cv2.flip(image, 1), cv2.COLOR_BGR2RGB)
+    return image
 
 if __name__ == '__main__':
     # init camera
@@ -36,108 +23,92 @@ if __name__ == '__main__':
 
     font = cv2.FONT_HERSHEY_COMPLEX_SMALL
 
-    # Grab a single frame of video
-    ret, frame = camera.read()
-    # Initialize the 'background'
-    fast_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-    gray = cv2.cvtColor(fast_frame, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (21, 21), 0)
-    background = gray
-    
-    prevCnt = (0,0,0,0)
-    movement_direction = None
+    hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.5, min_tracking_confidence=0.9)
 
-    while True:
-        # Set background to previous frame
-        background = gray
+    index = 0
+    refresh_rate = 10
+    speed = 1
+    threshold = 50
+    prev_data = [0,0]
+    change = [0,0]
 
+    while camera.isOpened():
         # Init and FPS process
         start_time = time.time()
 
-        # Grab a single frame of video
-        ret, frame = camera.read()
+        if index == refresh_rate:
+            print(change)
+            if abs(change[0]) > abs(change[1]):
+                pyautogui.hscroll(speed*(change[0]/abs(change[0]))*min(abs(change[0] * pyautogui.size()[1]),30))
+            elif abs(change[1]) > abs(change[0]):
+                pyautogui.scroll(speed*(-change[1]/abs(change[1]))*min(abs(change[1] * pyautogui.size()[0]),30))
+            #pyautogui.moveTo(np.average(data[:,0]),np.average(data[:,1]))
+            index = 0
+            prev_data = [0,0]
+            change = [0,0]
 
-        # calculate FPS >> FPS = 1 / time to process loop
+        # Grab a single frame
+        success, image = camera.read()
+        if not success:
+            print("Ignoring empty camera frame.")
+            # If loading a video, use 'break' instead of 'continue'.
+            continue
+        
+        # Preprocess Image
+        image = image_preprocess(image)
+        # To improve performance, optionally mark the image as not writeable to
+        # pass by reference.
+        image.flags.writeable = False
+        # Hand Detection
+        results = hands.process(image)
+        
+        # Draw the hand annotations on an empty image.
+        #image.flags.writeable = True
+        #image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        empty_frame = np.zeros(shape=image.shape, dtype=np.uint8)
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(
+                    empty_frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                
+                threshold = abs(hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].x
+                    - hand_landmarks.landmark[mp_hands.HandLandmark.WRIST].x) / 3
+
+                if index == 0:
+                    prev_data = [
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+                    ]
+                else:
+                    new_change = [
+                        prev_data[0] - hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x,
+                        prev_data[1] - hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+                    ]
+
+                    if abs(new_change[0]) >= threshold:
+                        change[0] += new_change[0] 
+                    if abs(new_change[1]) >= threshold:
+                        change[1] += new_change[1] 
+
+                    prev_data = [
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+                    ]
+        
+        # Display Result Image + Info
+        # Calculate FPS >> FPS = 1 / time to process loop
         fpsInfo = "FPS: " + str(1.0 / (time.time() - start_time)) 
         #print(fpsInfo)
-        cv2.putText(frame, fpsInfo, (10, 10), font, 0.4, (255, 255, 255), 1)
+        cv2.putText(empty_frame, fpsInfo, (10, 10), font, 0.4, (255, 255, 255), 1)
 
-        text = "No Movement"
-
-        fast_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-        gray = cv2.cvtColor(fast_frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (21, 21), 0)
-
-        # compute the absolute difference between the current frame and background
-        frameDelta = cv2.absdiff(background, gray)
-        # speed threshold - 25 pixels
-        thresh = cv2.threshold(frameDelta, 25, 255, cv2.THRESH_BINARY)[1]
-        # dilate the thresholded image to fill in holes, then find contours
-        # on thresholded image
-        thresh = cv2.dilate(thresh, None, iterations=2)
-        cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cnts = grab_contours(cnts)
-        # loop over the contours
-        if cnts: print('-'*30)
-        biggestCnt = None
-        biggestCntArea = 0
-        for c in cnts:
-            area = cv2.contourArea(c)
-            # if the contour is too small, ignore it
-            if area < 20:
-                continue
-            
-            # compute the bounding box for the contour, draw it on the frame,
-            # and update the text
-            (x, y, w, h) = cv2.boundingRect(c)
-            #print((x, y, w, h))
-            #cv2.rectangle(frame, (x*4, y*4), (x*4 + w*4, y*4 + h*4), (0, 255, 0), 2)
-            text = "Detecting"
-
-            if area > biggestCntArea:
-                biggestCnt = (x, y, w, h)
-
-        if prevCnt and biggestCnt:
-            (x, y, w, h) = biggestCnt
-            cv2.rectangle(frame, (x*4, y*4), (x*4 + w*4, y*4 + h*4), (0, 255, 0), 2)
-            
-            xOffset = 10*(prevCnt[0] - biggestCnt[0])
-            yOffset = 10*(biggestCnt[1] - prevCnt[1])
-
-            print('Movement:', end='\t')
-            if biggestCnt[0] > prevCnt[0]:
-                print('Left', end='\t')
-            elif biggestCnt[0] < prevCnt[0]:
-                print('Right', end='\t')
-            else:
-                print(end='\t')
-
-            if biggestCnt[1] > prevCnt[1]:
-                print('Down', end='\t')
-            elif biggestCnt[1] < prevCnt[1]:
-                print('Up', end='\t')
-            else:
-                print(end='\t')
-
-            pyautogui.moveRel(xOffset, yOffset)
-            print()
-
-        # draw the text and timestamp on the frame
-        cv2.putText(frame, "Room Status: {}".format(text), (10, 20), font, 0.5, (0, 0, 255), 2)
-        cv2.putText(frame, datetime.datetime.now().strftime("%A %d %B %Y %I:%M:%S%p"), (10, frame.shape[0] - 10), font, 0.35, (0, 0, 255), 1)
-        # show the frame and record if the user presses a key
-        cv2.imshow("Security Feed", frame)
-        cv2.imshow("Thresh", thresh)
-        cv2.imshow("Frame Delta", frameDelta)
-
-        prevCnt = biggestCnt
-        
         # Display the resulting image
-        cv2.imshow('Video', frame)
-
+        cv2.imshow('Video', empty_frame)
+        
         # Hit 'q' on the keyboard to quit!    
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+
+        index += 1
 
     # Release handle to the webcam
     camera.release()
