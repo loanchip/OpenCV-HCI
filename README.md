@@ -9,11 +9,12 @@ Mediapipe Hands: https://google.github.io/mediapipe/solutions/hands
 - faces.py: Face Recognition  
 - motion_detection.py: Motion Detection  
 - motion_scroll.py: Scrolling based on motion detection  
+- hand_tracking.py: Mouse Control based on Hand Movements and Gestures  
   
 ### Current Progress:  
-- Mouse Control using Movement Detection  
-  - Implemented simple motion detection based mouse movements  
-  - Implemented simple motion detection based scrolling  
+- Mouse Control using Hand Movements and Gestures  
+  - Implemented hand movement based mouse movements  
+  - Implemented hand gesture based scrolling and clicking  
 
 ### To Do:  
 Use Mask-based Hand Detection to identify hand movements and gestures  
@@ -21,7 +22,8 @@ Use Mask-based Hand Detection to identify hand movements and gestures
 Dual camera is used for all rgb-d images for depth view - Microsoft/Azure Kinect  
 
 Single camera based approach:  
- - Hand detection / segmentation  
- - Fingertip detection  
- - Between frame movements  
- - Gesture classification  
+ - Hand detection / segmentation - Done  
+ - Fingertip detection - Done  
+ - Between frame movements - Done  
+ - Gesture classification - Done (Rule Based)  
+ - Gesture classification using ML  
