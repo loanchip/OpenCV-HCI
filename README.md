@@ -3,6 +3,7 @@ OpenCV based Human - Computer Interaction
   
 Docs: https://docs.opencv.org/master/  
 Python Tutorial Docs: https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_tutorials.html  
+Mediapipe Hands: https://google.github.io/mediapipe/solutions/hands  
 
 ## Implemented Modules:  
 - faces.py: Face Recognition  

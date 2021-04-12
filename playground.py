@@ -5,6 +5,7 @@ import datetime
 import numpy as np
 import cv2
 import pyautogui
+pyautogui.FAILSAFE = False
 import mediapipe as mp
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
@@ -29,23 +30,32 @@ if __name__ == '__main__':
     refresh_rate = 10
     speed = 1
     threshold = 50
-    prev_data = [0,0]
-    change = [0,0]
+    prev_data = [0,0,0,0,0,0]
+    finger_change = [0,0,0,0]
 
     while camera.isOpened():
         # Init and FPS process
         start_time = time.time()
 
         if index == refresh_rate:
-            print(change)
-            if abs(change[0]) > abs(change[1]):
-                pyautogui.hscroll(speed*(change[0]/abs(change[0]))*min(abs(change[0] * pyautogui.size()[1]),30))
-            elif abs(change[1]) > abs(change[0]):
-                pyautogui.scroll(speed*(-change[1]/abs(change[1]))*min(abs(change[1] * pyautogui.size()[0]),30))
-            #pyautogui.moveTo(np.average(data[:,0]),np.average(data[:,1]))
+            print(finger_change)
+            # Thumb Movement - Horizontal
+            if abs(finger_change[2]) > abs(finger_change[3]):
+                # Right swipe
+                if finger_change[2] > 0:
+                    pyautogui.click()
+                # Left swipe
+                else:
+                    pyautogui.doubleClick()
+            # Horizontal Gesture
+            if abs(finger_change[0]) > abs(finger_change[1]):
+                pyautogui.hscroll(speed*(finger_change[0]/abs(finger_change[0]))*min(abs(finger_change[0] * pyautogui.size()[1]),30))
+            # Vertical Gesture
+            elif abs(finger_change[1]) > abs(finger_change[0]):
+                pyautogui.scroll(speed*(-finger_change[1]/abs(finger_change[1]))*min(abs(finger_change[1] * pyautogui.size()[0]),30))
             index = 0
-            prev_data = [0,0]
-            change = [0,0]
+            prev_data = [0,0,0,0,0,0]
+            finger_change = [0,0,0,0]
 
         # Grab a single frame
         success, image = camera.read()
@@ -71,28 +81,65 @@ if __name__ == '__main__':
                 mp_drawing.draw_landmarks(
                     empty_frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                 
+                pyautogui.moveTo(
+                    (
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].x + 
+                        hand_landmarks.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_MCP].x + 
+                        hand_landmarks.landmark[mp_hands.HandLandmark.RING_FINGER_MCP].x + 
+                        hand_landmarks.landmark[mp_hands.HandLandmark.PINKY_MCP].x #+ 
+                        #hand_landmarks.landmark[mp_hands.HandLandmark.WRIST].x
+                    ) * pyautogui.size()[0] / 4,
+                    (
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].y + 
+                        hand_landmarks.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_MCP].y + 
+                        hand_landmarks.landmark[mp_hands.HandLandmark.RING_FINGER_MCP].y + 
+                        hand_landmarks.landmark[mp_hands.HandLandmark.PINKY_MCP].y #+ 
+                        #hand_landmarks.landmark[mp_hands.HandLandmark.WRIST].y
+                    ) * pyautogui.size()[1] / 4
+                )
+
                 threshold = abs(hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].x
                     - hand_landmarks.landmark[mp_hands.HandLandmark.WRIST].x) / 3
 
                 if index == 0:
                     prev_data = [
                         hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x,
-                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].x,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].y,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP].x,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP].y,
                     ]
                 else:
-                    new_change = [
+                    new_hand_change = [
+                        prev_data[2] - hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].x,
+                        prev_data[3] - hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].y
+                    ]
+                    new_finger_change = [
                         prev_data[0] - hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x,
-                        prev_data[1] - hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+                        prev_data[1] - hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y,
+                        prev_data[4] - hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP].x,
+                        prev_data[5] - hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP].y
                     ]
 
-                    if abs(new_change[0]) >= threshold:
-                        change[0] += new_change[0] 
-                    if abs(new_change[1]) >= threshold:
-                        change[1] += new_change[1] 
+                    if abs(new_hand_change[0]) <= threshold:
+                        if abs(new_finger_change[0]) >= threshold:
+                            finger_change[0] += new_finger_change[0]
+                        if abs(new_finger_change[2]) >= threshold*2:
+                            finger_change[2] += new_finger_change[2]
+                    if abs(new_hand_change[1]) <= threshold:
+                        if abs(new_finger_change[1]) >= threshold:
+                            finger_change[1] += new_finger_change[1] 
+                        if abs(new_finger_change[3]) >= threshold*2:
+                            finger_change[3] += new_finger_change[3] 
 
                     prev_data = [
                         hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x,
-                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].x,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP].y,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP].x,
+                        hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP].y,
                     ]
         
         # Display Result Image + Info
